@@ -17,51 +17,31 @@
 package stun
 
 import (
-	"errors"
-	"net"
-	"strconv"
+	"golang.org/x/net/context"
 )
 
-var (
-	serverAddr   string
-	softwareName string
-)
-
-func init() {
-	SetSoftwareName(DefaultSoftwareName)
+// Client holds all STUN server details.
+type Client struct {
+	ServerAddr   string // Address of the STUN server
+	SoftwareName string // Name of the Client software (defaults to 'StunClient')
 }
 
-// SetServerHost allows user to set the STUN hostname and port
-func SetServerHost(host string, port int) error {
-	ips, err := net.LookupHost(host)
-	if err != nil {
-		return err
-	}
-	if len(ips) == 0 {
-		return errors.New("Failed to get IP address of " + host)
-	}
-	serverAddr = net.JoinHostPort(ips[0], strconv.Itoa(port))
-	return nil
-}
-
-// SetServerAddr allows user to set the transport layer STUN server address
-func SetServerAddr(address string) {
-	serverAddr = address
-}
-
-// SetSoftwareName allows user to set the name of her software
-func SetSoftwareName(name string) {
-	softwareName = name
+// DefaultClient for global methods
+var DefaultClient = Client{
+	ServerAddr: "stun1.voiceeclipse.net:3478",
 }
 
 // Discover contacts the STUN server and gets the response of NAT type, host
 // for UDP punching
-func Discover() (int, *Host, error) {
-	if serverAddr == "" {
-		err := SetServerHost(DefaultServerHost, DefaultServerPort)
-		if err != nil {
-			return NAT_ERROR, nil, err
-		}
+func Discover(ctx context.Context) (int, *Host, error) {
+	return DefaultClient.Discover(ctx)
+}
+
+// Discover contacts the STUN server and gets the response of NAT type, host
+// for UDP punching
+func (client *Client) Discover(ctx context.Context) (int, *Host, error) {
+	if ctx == nil {
+		ctx = context.Background()
 	}
-	return discover()
+	return client.discover(ctx)
 }

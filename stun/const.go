@@ -17,9 +17,7 @@
 package stun
 
 const (
-	DefaultServerHost   = "provserver.televolution.net"
-	DefaultServerPort   = 3478
-	DefaultSoftwareName = "StunClient"
+	defaultSoftwareName = "StunClient"
 )
 
 const (

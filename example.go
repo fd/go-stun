@@ -18,11 +18,11 @@ package main
 
 import (
 	"fmt"
-	"github.com/ccding/go-stun/stun"
+	"github.com/fd/go-stun/stun"
 )
 
 func main() {
-	nat, host, err := stun.Discover()
+	nat, host, err := stun.Discover(nil)
 	if err != nil {
 		fmt.Println(err)
 	}

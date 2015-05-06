@@ -133,10 +133,10 @@ func (packet *packet) send(conn net.Conn) (*packet, error) {
 		l, err = conn.Read(b)
 		if err == nil {
 			return newPacketFromBytes(b[0:l]), nil
-		} else {
-			if !err.(net.Error).Timeout() {
-				return nil, err
-			}
+		}
+
+		if !err.(net.Error).Timeout() {
+			return nil, err
 		}
 	}
 

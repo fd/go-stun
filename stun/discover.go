@@ -19,6 +19,9 @@ package stun
 import (
 	"errors"
 	"net"
+	"time"
+
+	"golang.org/x/net/context"
 )
 
 // padding the length of the byte slice to multiple of 4
@@ -33,15 +36,36 @@ func align(l uint16) uint16 {
 	return (l + 3) & 0xfffc
 }
 
-func sendBindingReq(destAddr string) (*packet, string, error) {
-	connection, err := net.Dial("udp", destAddr)
+func dialWithContext(ctx context.Context, addr string) (net.Conn, error) {
+	if ctx.Err() != nil {
+		return nil, ctx.Err()
+	}
+
+	deadline, hasDeadline := ctx.Deadline()
+	if !hasDeadline {
+		return net.Dial("udp", addr)
+	}
+
+	conn, err := net.DialTimeout("udp", addr, deadline.Sub(time.Now()))
+	if err != nil {
+		return nil, err
+	}
+	conn.SetDeadline(deadline)
+
+	return conn, nil
+}
+
+func (client *Client) sendBindingReq(ctx context.Context, destAddr string) (*packet, string, error) {
+	connection, err := dialWithContext(ctx, destAddr)
 	if err != nil {
 		return nil, "", err
 	}
 
+	defer connection.Close()
+
 	packet := newPacket()
 	packet.types = type_BINDING_REQUEST
-	attribute := newSoftwareAttribute(packet, DefaultSoftwareName)
+	attribute := newSoftwareAttribute(packet, client.SoftwareName)
 	packet.addAttribute(*attribute)
 	attribute = newFingerprintAttribute(packet)
 	packet.addAttribute(*attribute)
@@ -52,22 +76,23 @@ func sendBindingReq(destAddr string) (*packet, string, error) {
 		return nil, "", err
 	}
 
-	err = connection.Close()
 	return packet, localAddr, err
 }
 
-func sendChangeReq(changeIp bool, changePort bool) (*packet, error) {
-	connection, err := net.Dial("udp", serverAddr)
+func (client *Client) sendChangeReq(ctx context.Context, changeIP bool, changePort bool) (*packet, error) {
+	connection, err := dialWithContext(ctx, client.ServerAddr)
 	if err != nil {
 		return nil, err
 	}
 
+	defer connection.Close()
+
 	// construct packet
 	packet := newPacket()
 	packet.types = type_BINDING_REQUEST
-	attribute := newSoftwareAttribute(packet, DefaultSoftwareName)
+	attribute := newSoftwareAttribute(packet, client.SoftwareName)
 	packet.addAttribute(*attribute)
-	attribute = newChangeReqAttribute(packet, changeIp, changePort)
+	attribute = newChangeReqAttribute(packet, changeIP, changePort)
 	packet.addAttribute(*attribute)
 	attribute = newFingerprintAttribute(packet)
 	packet.addAttribute(*attribute)
@@ -77,12 +102,11 @@ func sendChangeReq(changeIp bool, changePort bool) (*packet, error) {
 		return nil, err
 	}
 
-	err = connection.Close()
 	return packet, err
 }
 
-func test1(destAddr string) (*packet, string, bool, *Host, error) {
-	packet, localAddr, err := sendBindingReq(destAddr)
+func (client *Client) test1(ctx context.Context, destAddr string) (*packet, string, bool, *Host, error) {
+	packet, localAddr, err := client.sendBindingReq(ctx, destAddr)
 	if err != nil {
 		return nil, "", false, nil, err
 	}
@@ -109,25 +133,30 @@ func test1(destAddr string) (*packet, string, bool, *Host, error) {
 	return packet, changeAddr, identical, hm, nil
 }
 
-func test2() (*packet, error) {
-	return sendChangeReq(true, true)
+func (client *Client) test2(ctx context.Context) (*packet, error) {
+	return client.sendChangeReq(ctx, true, true)
 }
 
-func test3() (*packet, error) {
-	return sendChangeReq(false, true)
+func (client *Client) test3(ctx context.Context) (*packet, error) {
+	return client.sendChangeReq(ctx, false, true)
 }
 
 // follow rfc 3489 and 5389
-func discover() (int, *Host, error) {
-	packet, changeAddr, identical, host, err := test1(serverAddr)
+func (client *Client) discover(ctx context.Context) (int, *Host, error) {
+	ctx, cancel := context.WithCancel(ctx)
+	defer cancel()
+
+	packet, changeAddr, identical, host, err := client.test1(ctx, client.ServerAddr)
 	if err != nil {
 		return NAT_ERROR, nil, err
 	}
 	if packet == nil {
 		return NAT_BLOCKED, nil, err
 	}
+
+	// detect symetric
 	if identical {
-		packet, err = test2()
+		packet, err = client.test2(ctx)
 		if err != nil {
 			return NAT_ERROR, host, err
 		}
@@ -135,37 +164,37 @@ func discover() (int, *Host, error) {
 			return NAT_NONE, host, nil
 		}
 		return NAT_SYMETRIC_UDP_FIREWALL, host, nil
-	} else {
-		packet, err = test2()
+	}
+
+	// detect full nat
+	packet, err = client.test2(ctx)
+	if err != nil {
+		return NAT_ERROR, host, err
+	}
+	if packet != nil {
+		return NAT_FULL, host, nil
+	}
+
+	packet, _, identical, _, err = client.test1(ctx, changeAddr)
+	if err != nil {
+		return NAT_ERROR, host, err
+	}
+	if packet == nil {
+		// It should be NAT_BLOCKED, but will be
+		// detected in the first step. So this will
+		// never happen.
+		return NAT_UNKNOWN, host, nil
+	}
+	if identical {
+		packet, err = client.test3(ctx)
 		if err != nil {
 			return NAT_ERROR, host, err
 		}
-		if packet != nil {
-			return NAT_FULL, host, nil
-		} else {
-			packet, _, identical, _, err := test1(changeAddr)
-			if err != nil {
-				return NAT_ERROR, host, err
-			}
-			if packet == nil {
-				// It should be NAT_BLOCKED, but will be
-				// detected in the first step. So this will
-				// never happen.
-				return NAT_UNKNOWN, host, nil
-			}
-			if identical {
-				packet, err = test3()
-				if err != nil {
-					return NAT_ERROR, host, err
-				}
-				if packet == nil {
-					return NAT_PORT_RESTRICTED, host, nil
-				} else {
-					return NAT_RESTRICTED, host, nil
-				}
-			} else {
-				return NAT_SYMETRIC, host, nil
-			}
+		if packet == nil {
+			return NAT_PORT_RESTRICTED, host, nil
 		}
+		return NAT_RESTRICTED, host, nil
 	}
+
+	return NAT_SYMETRIC, host, nil
 }
