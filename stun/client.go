@@ -43,5 +43,8 @@ func (client *Client) Discover(ctx context.Context) (int, *Host, error) {
 	if ctx == nil {
 		ctx = context.Background()
 	}
+	if client.SoftwareName == "" {
+		client.SoftwareName = "StunClient"
+	}
 	return client.discover(ctx)
 }

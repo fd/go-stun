@@ -18,11 +18,41 @@ package main
 
 import (
 	"fmt"
+	"time"
+
 	"github.com/fd/go-stun/stun"
+	"golang.org/x/net/context"
 )
 
 func main() {
-	nat, host, err := stun.Discover(nil)
+	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+	defer cancel()
+
+	mc := stun.MultiClient{
+		ServerAddrs: []string{
+			"stun.l.google.com:19302",
+			"stun1.l.google.com:19302",
+			"stun2.l.google.com:19302",
+			"stun3.l.google.com:19302",
+			"stun4.l.google.com:19302",
+			"stun01.sipphone.com:3478",
+			"stun.ekiga.net:3478",
+			"stun.fwdnet.net:3478",
+			"stun.ideasip.com:3478",
+			"stun.iptel.org:3478",
+			"stun.rixtelecom.se:3478",
+			"stun.schlund.de:3478",
+			"stunserver.org:3478",
+			"stun.softjoys.com:3478",
+			"stun.voiparound.com:3478",
+			"stun.voipbuster.com:3478",
+			"stun.voipstunt.com:3478",
+			"stun.voxgratia.org:3478",
+			"stun.xten.com:3478",
+		},
+	}
+
+	nat, host, err := mc.Discover(ctx)
 	if err != nil {
 		fmt.Println(err)
 	}
